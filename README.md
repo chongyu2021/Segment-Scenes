@@ -1,24 +1,27 @@
 # Video Scene Detection and Segmentation
 
-This script is designed to process a video file, detect different scenes within it, and export segmented clips based on scene changes. The detection is performed using Structural Similarity (SSIM) between consecutive frames. If the SSIM value falls below a specified threshold, a new scene is identified, and the corresponding segment is exported.
+This script is designed to detect different scenes in a video and segment it into different clips. The detection is performed using Structural Similarity (SSIM) between frames. If the SSIM value falls below a specified threshold, a new scene is identified.
 
 ## Requirements
 
 - Python 3.x
 - OpenCV (`cv2`)
 - Scikit-Image (`skimage`)
-- Numpy
 
 ## Installation
 
 ```
-pip install opencv-python scikit-image numpy
+pip install opencv-python scikit-image
 ```
 
-## Usage
+## Function Arguments
 
-## Functions
+--`video_path`: Path to the input video file.
+--`read_size`: Number of frames to read in each batch (default: 500).
+--`min_interval`: Minimum interval between scene borders (default: 200).
+--`ssim_threshold`: SSIM threshold for scene change detection (default: 0.50).
+--`output_path`: Directory to save the segmented clips.
 
-## Example
+
 
 

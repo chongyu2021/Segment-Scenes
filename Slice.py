@@ -2,102 +2,144 @@ import os
 import cv2
 from skimage.metrics import structural_similarity
 
-def my_slice(video_path, start_frame, end_frame, save_path):
-    # Read the video file
-    video_capture = cv2.VideoCapture(video_path)
-    # Set the starting frame
-    video_capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
-    # Get the video frame rate and dimensions
-    fps = int(video_capture.get(cv2.CAP_PROP_FPS))
-    width = int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    # Create a VideoWriter object for writing the new video
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
-
-    # Read each frame between the specified range and write it to the new video
-    for i in range(start_frame, end_frame):
-        ret, frame = video_capture.read()
-        if ret:
-            out.write(frame)
-
-    # Release resources
-    out.release()
-    video_capture.release()
-
 def ssim(frame1, frame2):
     """Calculate Structural Similarity (SSIM) between two frames"""
     frame1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
     frame2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-    frame1 = cv2.resize(frame1, (256, 256))
-    frame2 = cv2.resize(frame2, (256, 256))
+    frame1 = cv2.resize(frame1, (512, 512))
+    frame2 = cv2.resize(frame2, (512, 512))
     return structural_similarity(frame1, frame2)
 
-def slice_by_ssim(video_path, ssim_threshold, min_frames_per_slice, save_path):
+
+def read_frames(video_path, size=1000):
     cap = cv2.VideoCapture(video_path)
+
     if not cap.isOpened():
         print("Error opening video file")
         return
 
-    start = 0
-    end = 0
-    slice_count = 0
-
     while True:
-        # Set the position of the next frame to read
-        cap.set(cv2.CAP_PROP_POS_FRAMES, end)
-        ret, prev = cap.read()
+        frames = []
 
-        # If we have reached the end of the video, break the loop
-        if not ret:
+        for _ in range(size):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+
+        if not frames:
             break
 
-        # Set the position of the next frame to read
-        cap.set(cv2.CAP_PROP_POS_FRAMES, end + 10)
-        ret, current = cap.read()
-
-        # If we have reached the end of the video, break the loop
-        if not ret:
-            break
-
-        # Compute the SSIM between prev and current
-        ssim_val = ssim(prev, current)
-        print("SSIM is", ssim_val)
-        if ssim_val > ssim_threshold:
-            end += 10
-        else:
-            # Search for the end of the current slice
-            slice_start = start
-            slice_end = start
-            frames = []
-            cap.set(cv2.CAP_PROP_POS_FRAMES, end)
-
-            for i in range(10):
-                ret, frame = cap.read()
-                if ret:
-                    frames.append(frame)
-            for i in range(len(frames)-1):
-                ssim_val = ssim(frames[i], frames[i+1])
-                if ssim_val < ssim_threshold:
-                    slice_end = end+i
-                    start = end+i+1
-                    end = end+i+1
-                    break
-
-            if slice_start != slice_end:
-                # Check if the slice is long enough
-                if slice_end - slice_start > min_frames_per_slice:
-                    # Slice the video and save it
-                    slice_count += 1
-                    slice_path = os.path.join(save_path, f"slice{slice_count}.mp4")
-                    print("Saving ", slice_start, " to ", slice_end)
-                    my_slice(video_path, slice_start, slice_end, slice_path)
-            else:
-                end += 10
+        yield frames
 
     cap.release()
 
+def slice_frames(frames,ssim_threshold):
+    start = 0
+    end = start + 1
+    total_length = len(frames)
+    borders = []
+    while end != total_length:
+        left = end
+        right = total_length - 1
+        while left != right:
+            mid = int((left + right)/2)
+            ssim_val = ssim(frames[start], frames[mid])
+            if ssim_val > ssim_threshold: # indicating that the same scene
+                left = mid + 1
+            else:
+                right = mid
+        borders.append(left)
+        start = left
+        end = start + 1
+    return borders
+
+def frames_to_video(video_path, borders, output_path):
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        print("Error opening video file")
+        return
+
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+    video_writer = None
+    segment_count = 1
+    frame_count = 0
+    current_border = 0
+
+    while True:
+        ret, frame = cap.read()
+        frame_count += 1
+
+        if not ret:
+            break
+
+        if current_border < len(borders) and frame_count > borders[current_border]:
+            if video_writer:
+                video_writer.release()
+
+            segment_path = os.path.join(output_path, f"segment_{segment_count}.mp4")
+            video_writer = cv2.VideoWriter(segment_path, fourcc, fps, (width, height))
+            segment_count += 1
+            current_border += 1
+
+        if video_writer:
+            video_writer.write(frame)
+        else:
+            segment_path = os.path.join(output_path, f"segment_{segment_count}.mp4")
+            video_writer = cv2.VideoWriter(segment_path, fourcc, fps, (width, height))
+            segment_count += 1
+            current_border += 1
+
+    if video_writer:
+        video_writer.release()
+
+    cap.release()
+
+def segment_scenes(video_path, read_size, min_interval, ssim_threshold, output_path):
+    last_frame = None  # Used to determine if two segments are connected
+    generator = read_frames(video_path, read_size)
+    final_borders = []
+    offset = 0
+
+    for frames in generator:
+        first_frame = frames[0]
+        print(f"Read {len(frames)} frames over")
+        borders = slice_frames(frames, ssim_threshold)
+
+        # Check if the last frame of the previous segment is similar to the first frame of the current segment
+        if last_frame is not None and ssim(first_frame, last_frame) >= ssim_threshold:
+            final_borders.pop()
+
+        final_borders.extend(b + offset for b in borders)
+        offset += read_size
+        last_frame = frames[-1]
+
+    last = 0
+    filtered_borders = []
+
+    # Filter borders based on the minimum interval
+    for item in final_borders:
+        if item - last < min_interval:
+            continue
+        else:
+            last = item
+            filtered_borders.append(item)
+
+    print(filtered_borders)
+
+    frames_to_video(video_path, filtered_borders, output_path)
+
+
 if __name__ == '__main__':
-    slice_by_ssim("test_input/test.mp4", 0.75, 30, "test_output")
+    read_size = 500
+    min_interval = 100  # Set the minimum interval value
+    ssim_threshold = 0.50  # Set the threshold for SSIM
+    video_path = "test_input/test.mp4"
+    output_path = "test_output"
+    segment_scenes(video_path, read_size, min_interval, ssim_threshold, output_path)
+
