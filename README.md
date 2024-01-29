@@ -17,9 +17,13 @@ pip install opencv-python scikit-image
 ## Function Arguments
 
 --`video_path`: Path to the input video file.
+
 --`read_size`: Number of frames to read in each batch (default: 500).
+
 --`min_interval`: Minimum interval between scene borders (default: 200).
+
 --`ssim_threshold`: SSIM threshold for scene change detection (default: 0.50).
+
 --`output_path`: Directory to save the segmented clips.
 
 
